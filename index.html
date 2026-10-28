@@ -205,7 +205,6 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
     <div class="brand">Tower Turnaround<small>Ground &amp; Tower Ops</small></div>
     <div class="apt-id" id="hdr-apt"></div>
     <div class="stats" id="hdr-stats"></div>
-    <div class="metar" id="hdr-metar"></div>
     <nav class="tabs" id="tabs"></nav>
   </header>
 
@@ -476,6 +475,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const hash=s=>{let h=7;for(const ch of s)h=(h*31+ch.charCodeAt(0))>>>0;return h};
 const clock=t=>{const s=Math.floor(6*3600+t);const h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60;return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')};
 const A=()=>S.airports[S.current];
+const toF=c=>Math.round(c*9/5+32);
 const cs=f=>f.al+' '+f.num;
 const level=()=>1+Math.floor(Math.sqrt(S.xp/150));
 const slots=()=>10+(level()-1)*2;
@@ -605,7 +605,7 @@ function step(st,dt){
   st.nextWx-=dt;
   if(st.nextWx<=0){
     const was=W(st).icing;st.weather=makeWeather(APMAP[st.code]);st.nextWx=ri(150,260);
-    addLog(st,`Weather update: ${W(st).n}. ${st.weather.metar}`,W(st).ts||W(st).icing?'warn':'');
+    addLog(st,`Weather update: ${W(st).n}, ${toF(st.weather.temp)}°F.`,W(st).ts||W(st).icing?'warn':'');
     if(W(st).icing){
       let n=0;for(const f of st.flights)if(['approach','goaround','landing','landed','taxiin','atgate'].includes(f.state)){
         if(!f.sv.some(s=>s.k==='deice')){f.sv.push({k:'deice',d:Math.round(SV.deice.d*SMULT[f.size]),st:'pending',end:0,start:0});f.std+=12;n++}
@@ -700,7 +700,7 @@ function renderHeader(){
   const st=S.current?A():null;
   put('tabs',S.view+'|'+!!S.current,()=>!S.current?'':[['ops','Operations'],['contracts','Contracts'],['expand','Expand'],['airports','Airports']]
     .map(([v,n])=>`<button class="${S.view===v?'on':''}" data-act="view" data-v="${v}">${n}</button>`).join(''));
-  if(!st){put('hdr-apt','none',()=>'');put('hdr-stats','none',()=>`<div class="stat"><label>Cash</label><span>${money(S.money)}</span></div>`);put('hdr-metar','none',()=>'');return}
+  if(!st){put('hdr-apt','none',()=>'');put('hdr-stats','none',()=>`<div class="stat"><label>Cash</label><span>${money(S.money)}</span></div>`);return}
   const ap=APMAP[st.code];
   put('hdr-apt',st.code,()=>`<span class="code">${st.code}</span><span class="nm"><b>${esc(ap.name)}</b>${esc(ap.city)}, ${ap.st} · ${icao(st.code)}</span>`);
   const lv=level(),lo=150*(lv-1)**2,hi=150*lv**2,pct=(S.xp-lo)/(hi-lo)*100;
@@ -712,7 +712,6 @@ function renderHeader(){
     <div class="stat"><label>Crews</label><span class="${used>=st.crew?'late':''}">${st.crew-used}/${st.crew} free</span></div>
     <div class="ctrl"><button class="${S.paused?'on':''}" data-act="pause" aria-label="Pause">${S.paused?'▶ Resume':'❚❚ Pause'}</button>
       ${[1,2,3].map(x=>`<button class="${!S.paused&&S.speed===x?'on':''}" data-act="speed" data-x="${x}">${x}×</button>`).join('')}</div>`);
-  put('hdr-metar',st.weather.metar,()=>`METAR <b>${st.weather.metar}</b>`);
 }
 
 function stripHead(f,label3,val3,sub3){
@@ -785,7 +784,7 @@ function renderOps(){
     if(w.fog)eff.push('Low visibility: longer landing roll');
     if(w.tx)eff.push(`Taxi times ×${w.tx}`);
     if(!eff.length)eff.push('No weather restrictions');
-    return `<div class="wx-name">${w.n}</div><div class="mono" style="font-size:12px;color:var(--muted);margin-top:4px">Wind ${String(st.weather.dir).padStart(3,'0')}° at ${st.weather.spd} kt · ${st.weather.temp}°C</div><ul class="wx-eff">${eff.map(e=>`<li>${e}</li>`).join('')}</ul>`});
+    return `<div class="wx-name">${w.n}</div><div class="mono" style="font-size:12px;color:var(--muted);margin-top:4px">Wind ${String(st.weather.dir).padStart(3,'0')}° at ${st.weather.spd} kt · ${toF(st.weather.temp)}°F</div><ul class="wx-eff">${eff.map(e=>`<li>${e}</li>`).join('')}</ul>`});
   // runways
   put('rwys',rn.join()+st.rwys.map(r=>r.busy).join(),()=>st.rwys.map((r,i)=>{const f=r.busy&&st.flights.find(x=>x.id===r.busy);
     return `<div class="rwy"><span class="des">${rn[i]}</span><span class="what">${f?`<b>${f.state==='landing'?'Landing':'Departing'}</b> ${cs(f)}`:'<b class="ok">Clear</b> · arrivals and departures'}</span></div>`}).join('')+
