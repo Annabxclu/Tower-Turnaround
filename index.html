@@ -87,6 +87,7 @@ nav.tabs button.on{color:var(--ink);border-bottom-color:var(--amber)}
 /* radar */
 .radar-wrap{background:var(--grass);border:1px solid var(--line);border-radius:6px;overflow:hidden;position:relative}
 #radar{display:block;width:100%;height:auto}
+.maptog{margin-left:auto;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:2px 10px;font-family:var(--f-body);font-size:12px;letter-spacing:.04em;text-transform:none;color:var(--ink)}
 .legend{position:absolute;right:8px;top:6px;font-family:var(--f-mono);font-size:10px;color:var(--muted)}
 
 /* gates */
@@ -216,7 +217,7 @@ td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <div><h2>Departures <span class="count" id="c-dep">0</span></h2><div class="list" id="deps"></div></div>
       </div>
       <div class="col mid">
-        <div class="radar-wrap"><canvas id="radar"></canvas><div class="legend" id="legend"></div></div>
+        <div><h2>Ground Map <button class="maptog" data-act="map" id="maptog">Show</button></h2><div class="radar-wrap" id="radarwrap" hidden><canvas id="radar"></canvas><div class="legend" id="legend"></div></div></div>
         <div><h2>Gates <span class="count" id="c-gates">0</span></h2><div class="gates" id="gates"></div></div>
       </div>
       <div class="col right">
@@ -652,6 +653,7 @@ function act(a,d){
   switch(a){
     case 'view':S.view=d.v;renderAll(true);break;
     case 'pause':S.paused=!S.paused;break;
+    case 'map':S.showMap=!S.showMap;break;
     case 'speed':S.speed=+d.x;S.paused=false;break;
     case 'land':{const r=+d.x;if(!f||f.state!=='approach'||st.rwys[r].busy)return;
       f.state='landing';f.rwy=r;f.t0=st.t;f.t1=st.t+landT(st);st.rwys[r].busy=f.id;addLog(st,`${cs(f)} cleared to land runway ${rwyNames(st)[r]}.`);break}
@@ -723,6 +725,7 @@ function stripHead(f,label3,val3,sub3){
 }
 function renderOps(){
   const st=A();const rn=rwyNames(st);const free=st.rwys.map(r=>!r.busy);
+  $('#radarwrap').hidden=!S.showMap;$('#maptog').textContent=S.showMap?'Hide':'Show';
   // approach
   const app=st.flights.filter(f=>f.state==='approach'||f.state==='goaround').sort((a,b)=>(a.state>b.state?1:-1)||a.t1-b.t1);
   $('#c-app').textContent=app.length;
@@ -895,7 +898,7 @@ function drawPlane(x,y,ang,sc,col,label,hl){
   if(label){ctx.font='600 10px JetBrains Mono, monospace';ctx.fillStyle=hl?COL['--amber']:COL['--ink'];ctx.textAlign='center';ctx.fillText(label,x*CW,y*CH-sc*11-3)}
 }
 function draw(now){
-  if(!S.current||S.view!=='ops'||!CW)return;const st=A();const t=st.t;const n=st.gates.length;const rn=rwyNames(st);
+  if(!S.current||S.view!=='ops'||!S.showMap)return;sizeCanvas();if(!CW)return;const st=A();const t=st.t;const n=st.gates.length;const rn=rwyNames(st);
   ctx.fillStyle=COL['--grass'];ctx.fillRect(0,0,CW,CH);
   ctx.fillStyle=COL['--apron'];ctx.fillRect(0,(TX-0.04)*CH,CW,CH);
   // runways
