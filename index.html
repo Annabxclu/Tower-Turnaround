@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}*,*::before,*::after{box-sizing:border-box}</style>
+<title>Tower Turnaround</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: tower console. Flight strips left, ground radar + stands center, runways / weather / log right. Single dark look by design. */
+:root{
+  --bg:#0d1720; --panel:#13212d; --panel2:#182a38; --line:#253d4d; --ink:#dce6eb; --muted:#8aa2b1;
+  --amber:#f2a53a; --amber-ink:#2a1a04; --go:#4cc496; --warn:#e8c467; --bad:#ec665d;
+  --arr:#ecdaa4; --dep:#bed8e6; --strip-ink:#211e17; --strip-line:#b9a774; --strip-muted:#6b6250;
+  --grass:#102119; --apron:#1d2832; --rwy:#38424c; --term:#22313e;
+  --f-disp:'Saira Condensed','Arial Narrow',sans-serif;
+  --f-body:'Barlow','Segoe UI',system-ui,sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+html,body{background:var(--bg);color:var(--ink)}
+body{font-family:var(--f-body);font-size:15px;line-height:1.4;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:12px 32px}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+h2{font-family:var(--f-disp);font-weight:600;font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+h2 .count{font-family:var(--f-mono);font-size:12px;letter-spacing:0;background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:0 6px;color:var(--ink)}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px 18px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:12px}
+.brand{font-family:var(--f-disp);font-weight:700;font-size:22px;letter-spacing:.06em;text-transform:uppercase;line-height:1;display:flex;flex-direction:column;justify-content:center}
+.brand small{font-family:var(--f-body);font-weight:500;font-size:11px;letter-spacing:.16em;color:var(--amber)}
+.apt-id{display:flex;align-items:center;gap:10px;min-width:0}
+.apt-id .code{font-family:var(--f-disp);font-weight:700;font-size:34px;line-height:1;color:var(--amber)}
+.apt-id .nm{font-size:13px;color:var(--muted);line-height:1.2;min-width:0}
+.apt-id .nm b{display:block;color:var(--ink);font-weight:600;font-size:14px}
+.stats{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin-left:auto}
+.stat{display:flex;flex-direction:column;line-height:1.1}
+.stat label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.stat span{font-family:var(--f-mono);font-size:15px;font-variant-numeric:tabular-nums}
+.xpbar{height:3px;background:var(--line);margin-top:3px;border-radius:2px;overflow:hidden;width:70px}
+.xpbar i{display:block;height:100%;background:var(--amber)}
+.ctrl{display:flex;gap:4px;align-items:center}
+.ctrl button{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 9px;font-family:var(--f-mono);font-size:12px}
+.ctrl button.on{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
+nav.tabs{display:flex;gap:2px;flex-wrap:wrap;width:100%}
+nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:6px 12px;font-family:var(--f-disp);font-weight:600;font-size:15px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+nav.tabs button.on{color:var(--ink);border-bottom-color:var(--amber)}
+.metar{font-family:var(--f-mono);font-size:12px;color:var(--muted);width:100%;overflow-wrap:anywhere}
+.metar b{color:var(--ink);font-weight:600}
+
+/* ops layout */
+.ops{display:grid;grid-template-columns:minmax(300px,360px) minmax(0,1fr) minmax(240px,290px);gap:16px;align-items:start}
+.col{display:flex;flex-direction:column;gap:18px;min-width:0}
+@media (max-width:1180px){.ops{grid-template-columns:minmax(300px,360px) minmax(0,1fr)}.ops .right{grid-column:1 / -1;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}}
+@media (max-width:780px){.ops{grid-template-columns:minmax(0,1fr)}.ops .mid{order:-1}}
+.list{display:flex;flex-direction:column;gap:8px}
+.empty{font-size:13px;color:var(--muted);border:1px dashed var(--line);border-radius:4px;padding:10px 12px}
+
+/* flight strips */
+.strip{--al:#888;background:var(--arr);color:var(--strip-ink);border-radius:2px;display:grid;grid-template-columns:8px minmax(0,1fr);box-shadow:0 1px 0 rgba(0,0,0,.4)}
+.strip.dep{background:var(--dep)}
+.strip.dim{opacity:.62}
+.strip .tab{background:var(--al);border-radius:2px 0 0 2px}
+.strip .body{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);min-width:0}
+.strip .cell{padding:5px 8px;border-right:1px solid var(--strip-line);border-bottom:1px solid var(--strip-line);min-width:0}
+.strip .cell:nth-child(3){border-right:none}
+.strip .cell label{display:block;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--strip-muted);font-weight:600}
+.strip .cs{font-family:var(--f-mono);font-weight:600;font-size:16px;line-height:1.1;white-space:nowrap}
+.strip .sub{font-size:11px;color:var(--strip-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.strip .val{font-family:var(--f-mono);font-weight:600;font-size:14px}
+.strip .foot{grid-column:1 / -1;padding:6px 8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.strip .msg{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:auto;display:flex;align-items:center;gap:6px}
+.strip .msg .t{font-family:var(--f-mono);font-weight:600}
+.wbar{grid-column:1 / -1;height:4px;background:rgba(0,0,0,.12)}
+.wbar i{display:block;height:100%;background:var(--strip-ink)}
+.wbar.hot i{background:#b83d2f}
+.sbtn{background:var(--strip-ink);color:var(--arr);border:none;border-radius:3px;padding:6px 10px;font-weight:600;font-size:13px;letter-spacing:.02em}
+.strip.dep .sbtn{color:var(--dep)}
+.sbtn:disabled{opacity:.35;cursor:not-allowed}
+.sbtn.ghost{background:transparent;color:var(--strip-ink);border:1px solid var(--strip-ink)}
+.blink{animation:blink 1s steps(2,start) infinite}
+@keyframes blink{to{visibility:hidden}}
+
+/* radar */
+.radar-wrap{background:var(--grass);border:1px solid var(--line);border-radius:6px;overflow:hidden;position:relative}
+#radar{display:block;width:100%;height:auto}
+.legend{position:absolute;right:8px;top:6px;font-family:var(--f-mono);font-size:10px;color:var(--muted)}
+
+/* gates */
+.gates{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px}
+.gate{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.gate.busy{border-color:#36566a}
+.gate.alert{border-color:var(--bad)}
+.ghead{display:flex;align-items:baseline;gap:8px}
+.ghead .gid{font-family:var(--f-disp);font-weight:700;font-size:22px;line-height:1}
+.ghead .acc{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.ghead .st{margin-left:auto}
+.pill{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;padding:2px 7px;border-radius:10px;border:1px solid currentColor;white-space:nowrap}
+.pill.go{color:var(--go)}.pill.amber{color:var(--amber)}.pill.bad{color:var(--bad)}.pill.mute{color:var(--muted)}.pill.cargo{color:#c9a46a}
+.gflt{display:flex;flex-wrap:wrap;gap:2px 10px;align-items:baseline;font-size:12px;color:var(--muted)}
+.gflt .cs{font-family:var(--f-mono);font-weight:600;font-size:15px;color:var(--ink)}
+.gflt .al{width:8px;height:8px;border-radius:2px;display:inline-block;background:var(--al)}
+.times{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.times div{background:var(--panel2);border-radius:4px;padding:4px 6px}
+.times label{display:block;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.times span{font-family:var(--f-mono);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.late{color:var(--bad)}.ok{color:var(--go)}
+.svcs{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:5px}
+.svc{position:relative;overflow:hidden;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:5px 6px 4px;text-align:left;display:flex;flex-direction:column;gap:1px;min-width:0}
+.svc .fill{position:absolute;inset:0 auto 0 0;width:0;background:rgba(242,165,58,.22);pointer-events:none}
+.svc .ab{font-family:var(--f-mono);font-weight:600;font-size:12px;position:relative}
+.svc .nm{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}
+.svc .tm{font-family:var(--f-mono);font-size:11px;position:relative;color:var(--muted)}
+.svc.ready{border-color:var(--amber);background:#2a2618}
+.svc.ready .ab{color:var(--amber)}
+.svc.ready:hover{background:#3a321a}
+.svc.run{border-color:var(--amber)}
+.svc.run .tm{color:var(--amber)}
+.svc.done{border-color:#2f6b55;background:#14302a}
+.svc.done .fill{background:rgba(76,196,150,.18);width:100%}
+.svc.done .tm{color:var(--go)}
+.svc.lock{opacity:.5;cursor:not-allowed}
+.svc.ice{border-style:dashed}
+.btn{background:var(--amber);color:var(--amber-ink);border:none;border-radius:4px;padding:8px 12px;font-weight:600;font-size:14px}
+.btn:disabled{background:var(--panel2);color:var(--muted);cursor:not-allowed}
+.btn.sec{background:var(--panel2);color:var(--ink);border:1px solid var(--line)}
+.btn.danger{background:var(--bad);color:#1d0807}
+.tbar{height:4px;background:var(--panel2);border-radius:2px;overflow:hidden}
+.tbar i{display:block;height:100%;background:var(--amber)}
+
+/* right column */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+.rwy{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.rwy:last-child{border-bottom:none}
+.rwy .des{font-family:var(--f-mono);font-weight:600;font-size:15px;background:var(--rwy);border:1px solid #556270;padding:2px 8px;border-radius:3px;min-width:58px;text-align:center}
+.rwy .what{font-size:13px;color:var(--muted);min-width:0}
+.rwy .what b{color:var(--ink)}
+.wx-name{font-family:var(--f-disp);font-size:22px;font-weight:600;line-height:1}
+.wx-eff{font-size:12px;color:var(--muted);margin:6px 0 0;padding-left:16px}
+.log{display:flex;flex-direction:column;gap:3px;max-height:340px;overflow:auto;font-size:12px}
+.log div{display:grid;grid-template-columns:52px 1fr;gap:6px;color:var(--muted)}
+.log div b{font-weight:500;color:var(--ink)}
+.log .good b{color:var(--go)}.log .bad b{color:var(--bad)}.log .warn b{color:var(--warn)}
+
+/* other views */
+.view-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;margin-bottom:14px}
+.view-head h1{font-family:var(--f-disp);font-weight:700;font-size:30px;letter-spacing:.03em;margin:0;text-wrap:balance}
+.view-head p{margin:0;color:var(--muted);max-width:65ch}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:13px;min-width:720px}
+th{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:600;padding:8px 10px;background:var(--panel2)}
+td{padding:7px 10px;border-top:1px solid var(--line);white-space:nowrap}
+td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.sz{font-family:var(--f-mono);font-weight:600;display:inline-grid;place-items:center;width:20px;height:20px;border-radius:3px;background:var(--panel2);border:1px solid var(--line);font-size:12px}
+.offers{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.offer{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.offer .r{font-family:var(--f-mono);font-size:18px;font-weight:600}
+.offer .meta{font-size:12px;color:var(--muted)}
+.offer .pay{font-family:var(--f-mono);color:var(--go);font-size:15px}
+.offer .why{font-size:12px;color:var(--bad)}
+.section{margin-top:24px}
+.shop{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.shopitem{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.shopitem .t{font-family:var(--f-disp);font-weight:700;font-size:22px;line-height:1}
+.shopitem .d{font-size:12px;color:var(--muted)}
+.sizes{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+.sizes div{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--muted)}
+.sizes b{font-family:var(--f-mono);color:var(--amber);font-size:16px;margin-right:6px}
+
+/* airports */
+.apt-tools{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.apt-tools input,.apt-tools select{background:var(--panel);border:1px solid var(--line);border-radius:4px;color:var(--ink);padding:8px 10px;font:inherit;min-width:0}
+.apt-tools input{flex:1 1 220px}
+.apts{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:8px}
+.apt{display:grid;grid-template-columns:62px minmax(0,1fr) auto;gap:10px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:9px 10px}
+.apt .c{font-family:var(--f-disp);font-weight:700;font-size:26px;line-height:1}
+.apt .n{min-width:0}
+.apt .n b{display:block;font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.apt .n span{font-size:12px;color:var(--muted)}
+.apt.locked .c{color:var(--muted)}
+.apt.mine{border-color:#35596d}
+.apt.mine .c{color:var(--amber)}
+.apt.here{border-color:var(--amber)}
+.apt .btn{padding:6px 10px;font-size:13px;white-space:nowrap}
+.intro{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-bottom:20px}
+@media (max-width:780px){.intro{grid-template-columns:1fr}}
+.intro ol{margin:0;padding-left:20px;font-size:14px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.intro ol b{color:var(--ink);font-weight:600}
+.intro h1{font-family:var(--f-disp);font-weight:700;font-size:40px;line-height:1;margin:0 0 8px;text-wrap:balance}
+.intro p{margin:0;color:var(--muted);max-width:60ch}
+
+.toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:6px;z-index:20;width:min(420px,calc(100% - 32px))}
+.toast{background:var(--panel2);border:1px solid var(--amber);border-radius:6px;padding:8px 12px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.5)}
+.toast.bad{border-color:var(--bad)}.toast.good{border-color:var(--go)}
+@media (prefers-reduced-motion:reduce){.blink{animation:none}}
+</style>
+
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">Tower Turnaround<small>Ground &amp; Tower Ops</small></div>
+    <div class="apt-id" id="hdr-apt"></div>
+    <div class="stats" id="hdr-stats"></div>
+    <div class="metar" id="hdr-metar"></div>
+    <nav class="tabs" id="tabs"></nav>
+  </header>
+
+  <section id="v-ops" hidden>
+    <div class="ops">
+      <div class="col left">
+        <div><h2>Final Approach <span class="count" id="c-app">0</span></h2><div class="list" id="approach"></div></div>
+        <div><h2>Landed · Choose Gate <span class="count" id="c-land">0</span></h2><div class="list" id="landed"></div></div>
+        <div><h2>Departures <span class="count" id="c-dep">0</span></h2><div class="list" id="deps"></div></div>
+      </div>
+      <div class="col mid">
+        <div class="radar-wrap"><canvas id="radar"></canvas><div class="legend" id="legend"></div></div>
+        <div><h2>Gates <span class="count" id="c-gates">0</span></h2><div class="gates" id="gates"></div></div>
+      </div>
+      <div class="col right">
+        <div><h2>Weather</h2><div class="card" id="wx"></div></div>
+        <div><h2>Runways</h2><div class="card" id="rwys"></div></div>
+        <div><h2>Tower Log</h2><div class="card"><div class="log" id="log"></div></div></div>
+      </div>
+    </div>
+  </section>
+  <section id="v-contracts" hidden></section>
+  <section id="v-expand" hidden></section>
+  <section id="v-airports" hidden>
+    <div id="apt-intro"></div>
+    <div class="apt-tools">
+      <input id="apt-q" type="search" placeholder="Search code, city, airport or state" aria-label="Search airports">
+      <select id="apt-tier" aria-label="Filter by size"><option value="0">All sizes</option><option value="1">Large hubs</option><option value="2">Medium hubs</option><option value="3">Regional</option></select>
+      <select id="apt-own" aria-label="Filter by status"><option value="all">All airports</option><option value="mine">My airports</option><option value="locked">Locked</option></select>
+    </div>
+    <div class="apts" id="apts"></div>
+    <div class="section" id="reset-zone"></div>
+  </section>
+</div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* ---------------- data ---------------- */
+const AIRPORT_DATA=`ATL|Hartsfield–Jackson Atlanta Intl|Atlanta|GA|1
+LAX|Los Angeles Intl|Los Angeles|CA|1
+ORD|Chicago O'Hare Intl|Chicago|IL|1
+DFW|Dallas/Fort Worth Intl|Dallas–Fort Worth|TX|1
+DEN|Denver Intl|Denver|CO|1
+JFK|John F. Kennedy Intl|New York|NY|1
+SFO|San Francisco Intl|San Francisco|CA|1
+SEA|Seattle–Tacoma Intl|Seattle|WA|1
+LAS|Harry Reid Intl|Las Vegas|NV|1
+MCO|Orlando Intl|Orlando|FL|1
+EWR|Newark Liberty Intl|Newark|NJ|1
+CLT|Charlotte Douglas Intl|Charlotte|NC|1
+PHX|Phoenix Sky Harbor Intl|Phoenix|AZ|1
+IAH|George Bush Intercontinental|Houston|TX|1
+MIA|Miami Intl|Miami|FL|1
+BOS|Boston Logan Intl|Boston|MA|1
+MSP|Minneapolis–Saint Paul Intl|Minneapolis|MN|1
+FLL|Fort Lauderdale–Hollywood Intl|Fort Lauderdale|FL|1
+DTW|Detroit Metropolitan Wayne County|Detroit|MI|1
+PHL|Philadelphia Intl|Philadelphia|PA|1
+LGA|LaGuardia|New York|NY|1
+BWI|Baltimore/Washington Intl|Baltimore|MD|1
+SLC|Salt Lake City Intl|Salt Lake City|UT|1
+SAN|San Diego Intl|San Diego|CA|1
+IAD|Washington Dulles Intl|Dulles|VA|1
+DCA|Ronald Reagan Washington National|Arlington|VA|1
+MDW|Chicago Midway Intl|Chicago|IL|1
+TPA|Tampa Intl|Tampa|FL|1
+HNL|Daniel K. Inouye Intl|Honolulu|HI|1
+BNA|Nashville Intl|Nashville|TN|1
+AUS|Austin–Bergstrom Intl|Austin|TX|1
+DAL|Dallas Love Field|Dallas|TX|1
+PDX|Portland Intl|Portland|OR|2
+STL|St. Louis Lambert Intl|St. Louis|MO|2
+HOU|William P. Hobby|Houston|TX|2
+OAK|Oakland San Francisco Bay|Oakland|CA|2
+MCI|Kansas City Intl|Kansas City|MO|2
+RDU|Raleigh–Durham Intl|Raleigh|NC|2
+SMF|Sacramento Intl|Sacramento|CA|2
+SJC|San José Mineta Intl|San Jose|CA|2
+SAT|San Antonio Intl|San Antonio|TX|2
+SNA|John Wayne|Santa Ana|CA|2
+MSY|Louis Armstrong New Orleans Intl|New Orleans|LA|2
+CLE|Cleveland Hopkins Intl|Cleveland|OH|2
+IND|Indianapolis Intl|Indianapolis|IN|2
+PIT|Pittsburgh Intl|Pittsburgh|PA|2
+CMH|John Glenn Columbus Intl|Columbus|OH|2
+CVG|Cincinnati/Northern Kentucky Intl|Hebron|KY|2
+SJU|Luis Muñoz Marín Intl|San Juan|PR|2
+OGG|Kahului|Kahului|HI|2
+RSW|Southwest Florida Intl|Fort Myers|FL|2
+JAX|Jacksonville Intl|Jacksonville|FL|2
+MKE|Milwaukee Mitchell Intl|Milwaukee|WI|2
+BDL|Bradley Intl|Windsor Locks|CT|2
+ABQ|Albuquerque Intl Sunport|Albuquerque|NM|2
+ANC|Ted Stevens Anchorage Intl|Anchorage|AK|2
+BUR|Hollywood Burbank|Burbank|CA|2
+ONT|Ontario Intl|Ontario|CA|2
+OMA|Eppley Airfield|Omaha|NE|2
+BUF|Buffalo Niagara Intl|Buffalo|NY|2
+PBI|Palm Beach Intl|West Palm Beach|FL|2
+CHS|Charleston Intl|Charleston|SC|2
+RIC|Richmond Intl|Richmond|VA|2
+SDF|Louisville Muhammad Ali Intl|Louisville|KY|2
+BOI|Boise|Boise|ID|2
+ELP|El Paso Intl|El Paso|TX|2
+OKC|Will Rogers World|Oklahoma City|OK|2
+TUL|Tulsa Intl|Tulsa|OK|2
+TUS|Tucson Intl|Tucson|AZ|2
+RNO|Reno–Tahoe Intl|Reno|NV|2
+BHM|Birmingham–Shuttlesworth Intl|Birmingham|AL|2
+MEM|Memphis Intl|Memphis|TN|2
+ORF|Norfolk Intl|Norfolk|VA|2
+SAV|Savannah/Hilton Head Intl|Savannah|GA|2
+GRR|Gerald R. Ford Intl|Grand Rapids|MI|2
+ALB|Albany Intl|Albany|NY|2
+PVD|Rhode Island T. F. Green Intl|Warwick|RI|2
+SYR|Syracuse Hancock Intl|Syracuse|NY|2
+ROC|Frederick Douglass Greater Rochester Intl|Rochester|NY|2
+LGB|Long Beach|Long Beach|CA|2
+KOA|Ellison Onizuka Kona Intl|Kailua-Kona|HI|2
+LIH|Lihue|Lihue|HI|2
+PSP|Palm Springs Intl|Palm Springs|CA|2
+DSM|Des Moines Intl|Des Moines|IA|2
+MSN|Dane County Regional|Madison|WI|2
+ICT|Wichita Eisenhower National|Wichita|KS|2
+LIT|Clinton National|Little Rock|AR|2
+GSP|Greenville-Spartanburg Intl|Greer|SC|2
+PNS|Pensacola Intl|Pensacola|FL|2
+SRQ|Sarasota Bradenton Intl|Sarasota|FL|2
+MYR|Myrtle Beach Intl|Myrtle Beach|SC|2
+GSO|Piedmont Triad Intl|Greensboro|NC|2
+BTV|Burlington Intl|Burlington|VT|3
+PWM|Portland Intl Jetport|Portland|ME|3
+MHT|Manchester–Boston Regional|Manchester|NH|3
+BGR|Bangor Intl|Bangor|ME|3
+BZN|Bozeman Yellowstone Intl|Bozeman|MT|3
+MSO|Missoula Montana|Missoula|MT|3
+BIL|Billings Logan Intl|Billings|MT|3
+FAI|Fairbanks Intl|Fairbanks|AK|3
+JNU|Juneau Intl|Juneau|AK|3
+FAR|Hector Intl|Fargo|ND|3
+BIS|Bismarck Municipal|Bismarck|ND|3
+FSD|Sioux Falls Regional|Sioux Falls|SD|3
+RAP|Rapid City Regional|Rapid City|SD|3
+JAC|Jackson Hole|Jackson|WY|3
+CPR|Casper/Natrona County Intl|Casper|WY|3
+SGF|Springfield–Branson National|Springfield|MO|3
+LEX|Blue Grass|Lexington|KY|3
+TYS|McGhee Tyson|Knoxville|TN|3
+CHA|Chattanooga Metropolitan|Chattanooga|TN|3
+AVL|Asheville Regional|Asheville|NC|3
+ILM|Wilmington Intl|Wilmington|NC|3
+CAE|Columbia Metropolitan|Columbia|SC|3
+JAN|Jackson–Medgar Wiley Evers Intl|Jackson|MS|3
+GPT|Gulfport–Biloxi Intl|Gulfport|MS|3
+MOB|Mobile Regional|Mobile|AL|3
+HSV|Huntsville Intl|Huntsville|AL|3
+SHV|Shreveport Regional|Shreveport|LA|3
+BTR|Baton Rouge Metropolitan|Baton Rouge|LA|3
+LFT|Lafayette Regional|Lafayette|LA|3
+AMA|Rick Husband Amarillo Intl|Amarillo|TX|3
+LBB|Lubbock Preston Smith Intl|Lubbock|TX|3
+MAF|Midland Intl Air & Space Port|Midland|TX|3
+CRP|Corpus Christi Intl|Corpus Christi|TX|3
+MFE|McAllen Intl|McAllen|TX|3
+EUG|Eugene|Eugene|OR|3
+MFR|Rogue Valley Intl–Medford|Medford|OR|3
+GEG|Spokane Intl|Spokane|WA|3
+PSC|Tri-Cities|Pasco|WA|3
+SBA|Santa Barbara Municipal|Santa Barbara|CA|3
+FAT|Fresno Yosemite Intl|Fresno|CA|3
+CRW|Yeager|Charleston|WV|3
+CID|The Eastern Iowa|Cedar Rapids|IA|3
+MLI|Quad Cities Intl|Moline|IL|3
+PIA|General Wayne A. Downing Peoria Intl|Peoria|IL|3
+BMI|Central Illinois Regional|Bloomington|IL|3
+SBN|South Bend Intl|South Bend|IN|3
+FWA|Fort Wayne Intl|Fort Wayne|IN|3
+EVV|Evansville Regional|Evansville|IN|3
+LAN|Capital Region Intl|Lansing|MI|3
+FNT|Bishop Intl|Flint|MI|3
+TVC|Cherry Capital|Traverse City|MI|3
+GRB|Green Bay–Austin Straubel Intl|Green Bay|WI|3
+ATW|Appleton Intl|Appleton|WI|3
+DLH|Duluth Intl|Duluth|MN|3
+RST|Rochester Intl|Rochester|MN|3
+LNK|Lincoln|Lincoln|NE|3
+COS|Colorado Springs|Colorado Springs|CO|3
+GJT|Grand Junction Regional|Grand Junction|CO|3
+ASE|Aspen/Pitkin County|Aspen|CO|3
+EGE|Eagle County Regional|Eagle|CO|3
+SAF|Santa Fe Regional|Santa Fe|NM|3
+FLG|Flagstaff Pulliam|Flagstaff|AZ|3
+ACY|Atlantic City Intl|Atlantic City|NJ|3
+HPN|Westchester County|White Plains|NY|3
+ISP|Long Island MacArthur|Islip|NY|3
+ABE|Lehigh Valley Intl|Allentown|PA|3
+MDT|Harrisburg Intl|Harrisburg|PA|3
+CAK|Akron–Canton|North Canton|OH|3
+DAY|Dayton Intl|Dayton|OH|3
+ROA|Roanoke–Blacksburg Regional|Roanoke|VA|3
+CHO|Charlottesville–Albemarle|Charlottesville|VA|3
+VPS|Destin–Fort Walton Beach|Valparaiso|FL|3
+TLH|Tallahassee Intl|Tallahassee|FL|3
+DAB|Daytona Beach Intl|Daytona Beach|FL|3
+EYW|Key West Intl|Key West|FL|3
+SFB|Orlando Sanford Intl|Sanford|FL|3
+PIE|St. Pete–Clearwater Intl|Clearwater|FL|3
+MLB|Melbourne Orlando Intl|Melbourne|FL|3
+GNV|Gaineville Regional|Gainesville|FL|3
+STT|Cyril E. King|Charlotte Amalie|VI|3
+GUM|Antonio B. Won Pat Intl|Tamuning|GU|3`.replace('Gaineville','Gainesville');
+const AIRPORTS=AIRPORT_DATA.split('\n').map(l=>{const [code,name,city,st,tier]=l.split('|');return{code,name,city,st,tier:+tier}});
+const APMAP=Object.fromEntries(AIRPORTS.map(a=>[a.code,a]));
+const ICAO_X={ANC:'PANC',FAI:'PAFA',JNU:'PAJN',HNL:'PHNL',OGG:'PHOG',KOA:'PHKO',LIH:'PHLI',SJU:'TJSJ',STT:'TIST',GUM:'PGUM'};
+const icao=c=>ICAO_X[c]||('K'+c);
+const TIER_NAME=['','Large hub','Medium hub','Regional'];
+const UNLOCK=[0,300000,150000,70000];
+const COLD=new Set('AK MN WI MI ND SD MT WY CO UT ID NE IA IL IN OH PA NY VT NH ME MA CT RI NJ WV KS MO WA'.split(' '));
+const WARM=new Set('FL HI PR VI GU AZ TX LA MS AL'.split(' '));
+const INTL=[['LHR','London'],['CDG','Paris'],['FRA','Frankfurt'],['AMS','Amsterdam'],['NRT','Tokyo'],['ICN','Seoul'],['MEX','Mexico City'],['YYZ','Toronto'],['CUN','Cancún'],['DXB','Dubai'],['GRU','São Paulo'],['SYD','Sydney'],['DUB','Dublin'],['MAD','Madrid']];
+const PLACE=Object.fromEntries([...AIRPORTS.map(a=>[a.code,a.city]),...INTL]);
+
+const SIZES=['A','B','C','D','E','F'];
+const SIZE_NOTE=['Small turboprop','Regional jet','Narrowbody','Large narrowbody','Widebody','Jumbo'];
+const TYPES={
+  pax:[['ATR 42','Dash 8-100','Saab 340'],['CRJ-200','ERJ-145','ATR 72'],['A320','737-800','A220-300','E175','A321neo','737 MAX 8'],['757-200','767-300ER','A310'],['787-9','777-300ER','A350-900','A330-300'],['747-8','A380']],
+  cargo:[['Cessna 408'],['ATR 72F'],['737-400F','A321P2F'],['767-300F','757-200F'],['777F','A330-200F'],['747-8F','747-400F']]
+};
+const AIRLINES=[
+  {c:'BWG',n:'Bluewing',col:'#4a86da'},{c:'SKP',n:'Skyline Pacific',col:'#2bb3a3'},{c:'MAG',n:'Magnolia Air',col:'#d9707f'},
+  {c:'NSA',n:'Northstar Airways',col:'#8f80e6'},{c:'SBX',n:'Sunbelt Express',col:'#f0a33a'},{c:'CSD',n:'Coastside Airlines',col:'#4bb4e6'},
+  {c:'AUR',n:'Aurora Airways',col:'#6fd08c'},{c:'RTL',n:'Redtail Air',col:'#e25b45'},{c:'MRD',n:'Meridian Air',col:'#c9a24a'},
+  {c:'PRA',n:'Prairie Air',col:'#9bbf4a'},{c:'HBR',n:'Harborline',col:'#5fa8b8'},{c:'LDS',n:'Lodestar Intl',col:'#d48ad8'}];
+const CARGO_AL=[{c:'BXB',n:'BoxBird Freight',col:'#b0855a'},{c:'NLC',n:'Northline Cargo',col:'#93a7b8'},{c:'TWC',n:'Tradewind Cargo',col:'#c7b36a'}];
+const ALMAP=Object.fromEntries([...AIRLINES,...CARGO_AL].map(a=>[a.c,a]));
+
+const SV={
+  deboard:{n:'Unload Pax',ab:'DEB',d:14}, ambulift:{n:'Ambulift',ab:'AMB',d:10}, baggage:{n:'Baggage',ab:'BAG',d:16},
+  cargo:{n:'Cargo',ab:'CGO',d:18}, cleaning:{n:'Cleaning',ab:'CLN',d:14}, catering:{n:'Catering',ab:'CAT',d:12},
+  lav:{n:'Lavatory',ab:'LAV',d:8}, water:{n:'Water',ab:'H2O',d:7}, repair:{n:'Repair',ab:'RPR',d:25},
+  fuel:{n:'Fueling',ab:'FUEL',d:18}, boarding:{n:'Load Pax',ab:'BRD',d:18}, deice:{n:'De-Icing',ab:'ICE',d:15}};
+const ORDER=Object.keys(SV);
+const DEPS={cleaning:['deboard'],catering:['deboard'],boarding:['deboard','cleaning','catering'],fuel:['repair']};
+const SMULT=[0.7,0.85,1,1.25,1.5,1.8];
+const BASEPAY=[1800,2600,4000,6200,9000,13500];
+const WX={
+  CLR:{n:'Clear',wx:'',vis:'10SM',cl:['FEW045','SCT250','SKC','FEW030']},
+  RA:{n:'Rain',wx:'RA',vis:'4SM',cl:['BKN018','OVC015'],tx:1.1},
+  FG:{n:'Fog',wx:'FG',vis:'1/4SM',cl:['OVC002','VV001'],fog:1,tx:1.15},
+  TS:{n:'Thunderstorms',wx:'+TSRA',vis:'3SM',cl:['BKN030CB'],ts:1,tx:1.15},
+  SN:{n:'Snow',wx:'SN',vis:'1SM',cl:['OVC008','OVC006'],icing:1,tx:1.3,cold:1},
+  FZFG:{n:'Freezing fog',wx:'FZFG',vis:'1/4SM',cl:['VV002'],icing:1,fog:1,tx:1.2,cold:1}};
+const GATE_SHOP=[
+  {id:'C3',max:2,cargo:true,price:22000},{id:'G4',max:2,price:15000},{id:'G5',max:1,price:9000},{id:'G6',max:3,price:35000},
+  {id:'G7',max:2,price:20000},{id:'C2',max:5,cargo:true,price:65000},{id:'G8',max:4,price:70000},{id:'G9',max:3,price:45000},
+  {id:'G10',max:5,price:120000},{id:'G11',max:4,price:90000},{id:'G12',max:5,price:150000},{id:'G13',max:2,price:26000}];
+const UPG=[0,6000,12000,25000,45000,80000];
+
+/* ---------------- helpers ---------------- */
+const $=s=>document.querySelector(s);
+const rand=(a,b)=>a+Math.random()*(b-a);
+const ri=(a,b)=>Math.floor(rand(a,b+1));
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const money=n=>'$'+Math.round(n).toLocaleString('en-US');
+const fmt=s=>{s=Math.max(0,Math.ceil(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hash=s=>{let h=7;for(const ch of s)h=(h*31+ch.charCodeAt(0))>>>0;return h};
+const clock=t=>{const s=Math.floor(6*3600+t);const h=Math.floor(s/3600)%24,m=Math.floor(s/60)%60;return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')};
+const A=()=>S.airports[S.current];
+const cs=f=>f.al+' '+f.num;
+const level=()=>1+Math.floor(Math.sqrt(S.xp/150));
+const slots=()=>10+(level()-1)*2;
+const sizeRange=g=>g.max===0?'A':'A–'+SIZES[g.max];
+
+/* ---------------- state ---------------- */
+const SAVE_KEY='tower-turnaround-v1';
+let S;
+function newState(){return{money:30000,xp:0,current:null,speed:1,paused:false,view:'airports',airports:{}}}
+function loadSave(){try{const r=localStorage.getItem(SAVE_KEY);if(r)return JSON.parse(r)}catch(e){}return null}
+function save(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(S))}catch(e){}}
+
+function makeWeather(ap,id){
+  if(!id){
+    const w=COLD.has(ap.st)?{CLR:40,RA:15,FG:9,TS:5,SN:22,FZFG:9}:WARM.has(ap.st)?{CLR:55,RA:20,FG:8,TS:17}:{CLR:50,RA:20,FG:12,TS:10,SN:5,FZFG:3};
+    let r=Math.random()*Object.values(w).reduce((a,b)=>a+b,0);for(const k in w){r-=w[k];if(r<=0){id=k;break}}id=id||'CLR';
+  }
+  const W=WX[id];const dir=ri(1,36)*10;const spd=W.ts?ri(14,24):ri(3,16);
+  const temp=W.cold?ri(-8,0):WARM.has(ap.st)?ri(18,31):ri(6,24);const dew=W.fog?temp:temp-ri(2,9);
+  const tt=v=>(v<0?'M':'')+String(Math.abs(v)).padStart(2,'0');
+  const d=new Date();const z=String(d.getUTCDate()).padStart(2,'0')+String(d.getUTCHours()).padStart(2,'0')+String(d.getUTCMinutes()).padStart(2,'0')+'Z';
+  const wind=String(dir).padStart(3,'0')+String(spd).padStart(2,'0')+(W.ts?'G'+(spd+10):'')+'KT';
+  const metar=[icao(ap.code),z,wind,W.vis,W.wx,pick(W.cl),tt(temp)+'/'+tt(dew),'A'+ri(2965,3040)].filter(Boolean).join(' ');
+  return{id,dir,spd,metar,temp}
+}
+const W=st=>WX[st.weather.id];
+const approachWin=st=>W(st).ts?22:W(st).fog?27:32;
+const landT=st=>W(st).fog?11:W(st).icing?10:8;
+const taxiMult=st=>W(st).tx||1;
+
+function rwyNames(st){
+  const h1=1+hash(st.code)%18,h2=h1+18;const p=n=>String(n).padStart(2,'0');
+  const diff=(a,b)=>{const d=Math.abs(a-b)%360;return d>180?360-d:d};
+  const useH1=diff(st.weather.dir,h1*10)<=diff(st.weather.dir,h2*10);
+  return useH1?[p(h1)+'L',p(h1)+'R']:[p(h2)+'R',p(h2)+'L'];
+}
+
+function pickRoute(ap,size){
+  const big=size>=4&&ap.tier<=2&&Math.random()<0.6;
+  const pool=AIRPORTS.filter(a=>a.code!==ap.code&&(size>=3?a.tier<=2:true));
+  const one=()=>big?pick(INTL)[0]:pick(pool).code;
+  const from=one();let to=one();if(to===from)to=pick(pool).code;return{from,to};
+}
+function makeContract(st,size,cargo,due){
+  const ap=APMAP[st.code];const al=pick(cargo?CARGO_AL:AIRLINES);const r=pickRoute(ap,size);
+  const num=cargo?ri(70,980)*2:ri(50,2899)*2;
+  return{id:st.seq++,al:al.c,size,cargo:!!cargo,from:r.from,to:r.to,num,interval:Math.round(rand(400+size*40,620+size*60)),
+    due,mult:+(0.9+Math.random()*0.3+(ap.tier===1?0.15:ap.tier===2?0.07:0)+(st.rep-60)/400).toFixed(2),active:null}
+}
+const payFor=c=>Math.round(BASEPAY[c.size]*(c.cargo?1.2:1)*c.mult/10)*10;
+
+function initAirport(code){
+  const st={code,t:0,rep:60,crew:5,seq:1,gates:[{id:'G1',max:1},{id:'G2',max:2},{id:'G3',max:2},{id:'C1',max:3,cargo:true}].map(g=>({...g,f:null})),
+    contracts:[],flights:[],rwys:[{busy:null},{busy:null}],weather:null,nextWx:ri(160,240),offers:[],nextOffers:180,log:[],stats:{flights:0,ontime:0,earned:0}};
+  st.weather=makeWeather(APMAP[code],'CLR');
+  const plan=[[0],[2],[1],[0],[2],[1],[2,1],[2],[1],[1,1]];const dues=[6,30,60,95,130,165,205,245,290,335];
+  plan.forEach((p,i)=>st.contracts.push(makeContract(st,p[0],p[1],dues[i])));
+  genOffers(st);
+  addLog(st,`${icao(code)} tower open. ${st.contracts.length} airline contracts signed.`,'good');
+  return st;
+}
+function genOffers(st){
+  const maxP=Math.max(...st.gates.filter(g=>!g.cargo).map(g=>g.max));
+  const maxC=Math.max(1,...st.gates.filter(g=>g.cargo).map(g=>g.max));
+  st.offers=[];
+  for(let i=0;i<5;i++){
+    const cargo=Math.random()<0.22;const top=Math.min(5,(cargo?maxC:maxP)+1);
+    const size=Math.min(top,Math.floor(Math.pow(Math.random(),0.7)*(top+1)));
+    st.offers.push(makeContract(st,size,cargo,0));
+  }
+}
+function genServices(size,cargo,icing){
+  const m=SMULT[size];const out=[];const add=k=>out.push({k,d:Math.round(SV[k].d*m*rand(0.9,1.15)),st:'pending',end:0,start:0});
+  if(cargo){add('cargo');if(Math.random()<.85)add('fuel');if(Math.random()<.1)add('repair');if(Math.random()<.2)add('water')}
+  else{
+    add('deboard');
+    if(Math.random()<.12)add('ambulift');
+    if(Math.random()<.9)add('baggage');
+    if(Math.random()<.35)add('cargo');
+    if(Math.random()<.85)add('cleaning');
+    if(Math.random()<(size>=2?.8:.35))add('catering');
+    if(Math.random()<.5)add('lav');
+    if(Math.random()<.45)add('water');
+    if(Math.random()<.08)add('repair');
+    if(Math.random()<.8)add('fuel');
+    add('boarding');
+  }
+  if(icing)add('deice');
+  out.sort((a,b)=>ORDER.indexOf(a.k)-ORDER.indexOf(b.k));return out;
+}
+function critPath(sv,t){
+  const r=k=>{const s=sv.find(x=>x.k===k);if(!s||s.st==='done')return 0;return s.st==='run'?Math.max(0,s.end-t):s.d};
+  const a=r('deboard')+Math.max(r('cleaning'),r('catering'))+r('boarding');
+  const b=r('repair')+r('fuel');const o=Math.max(r('baggage'),r('cargo'),r('lav'),r('water'),r('ambulift'));
+  return Math.max(a,b,o)+r('deice');
+}
+const estOf=(st,f)=>(f.state==='taxiin'?Math.max(0,f.t1-st.t):0)+critPath(f.sv,st.t);
+const depsMet=(f,s)=>s.k==='deice'?f.sv.every(x=>x.k==='deice'||x.st==='done'):(DEPS[s.k]||[]).every(k=>{const d=f.sv.find(x=>x.k===k);return!d||d.st==='done'});
+const crewUsed=st=>st.flights.reduce((n,f)=>n+f.sv.filter(s=>s.st==='run').length,0);
+const fits=(g,f)=>!!g.cargo===!!f.cargo&&g.max>=f.size;
+const gateIndex=(st,id)=>st.gates.findIndex(g=>g.id===id);
+
+function addLog(st,msg,kind=''){st.log.unshift({t:st.t,msg,kind});if(st.log.length>60)st.log.length=60}
+function toast(msg,kind=''){const el=document.createElement('div');el.className='toast '+kind;el.textContent=msg;$('#toasts').appendChild(el);setTimeout(()=>el.remove(),3600)}
+
+/* ---------------- simulation ---------------- */
+function spawn(st,c){
+  const type=pick(TYPES[c.cargo?'cargo':'pax'][c.size]);
+  const sv=genServices(c.size,c.cargo,W(st).icing);const win=approachWin(st);
+  const std=st.t+win*0.6+landT(st)+14+critPath(sv,0)*1.3+25+rand(0,15);
+  const f={id:st.seq++,cid:c.id,al:c.al,num:c.num,from:c.from,to:c.to,type,size:c.size,cargo:c.cargo,state:'approach',t0:st.t,t1:st.t+win,std,sv,gate:null,rwy:null,ga:0,pay:payFor(c),late:0};
+  st.flights.push(f);c.active=f.id;
+  addLog(st,`${cs(f)} on final from ${f.from}, ${f.type}.`);
+}
+function step(st,dt){
+  st.t+=dt;const t=st.t;
+  // contracts
+  const onFinal=st.flights.filter(f=>f.state==='approach').length;
+  for(const c of st.contracts){
+    if(t<c.due)continue;
+    if(c.active&&st.flights.some(f=>f.id===c.active)){c.due=t+15;continue}
+    c.active=null;
+    if(onFinal>=4){c.due=t+20;continue}
+    spawn(st,c);c.due=t+c.interval;
+  }
+  // weather
+  st.nextWx-=dt;
+  if(st.nextWx<=0){
+    const was=W(st).icing;st.weather=makeWeather(APMAP[st.code]);st.nextWx=ri(150,260);
+    addLog(st,`Weather update: ${W(st).n}. ${st.weather.metar}`,W(st).ts||W(st).icing?'warn':'');
+    if(W(st).icing){
+      let n=0;for(const f of st.flights)if(['approach','goaround','landing','landed','taxiin','atgate'].includes(f.state)){
+        if(!f.sv.some(s=>s.k==='deice')){f.sv.push({k:'deice',d:Math.round(SV.deice.d*SMULT[f.size]),st:'pending',end:0,start:0});f.std+=12;n++}
+      }
+      if(!was)toast(`Icing conditions. De-icing added to ${n} flight${n===1?'':'s'}.`,'bad');
+    }else if(was){
+      for(const f of st.flights){const i=f.sv.findIndex(s=>s.k==='deice'&&s.st==='pending');if(i>=0)f.sv.splice(i,1)}
+      toast('Icing has cleared. Pending de-icing cancelled.','good');
+    }
+    if(W(st).ts)toast('Thunderstorms: approach windows are shorter.','bad');
+  }
+  // offers
+  st.nextOffers-=dt;if(st.nextOffers<=0){genOffers(st);st.nextOffers=180}
+  // flights
+  for(const f of [...st.flights]){
+    if(f.state==='approach'&&t>=f.t1){
+      f.state='goaround';f.t0=t;f.t1=t+35;f.ga++;st.rep=clamp(st.rep-2,0,100);
+      addLog(st,`${cs(f)} going around. No landing clearance.`,'bad');toast(`${cs(f)} went around and will be late.`,'bad');
+    }else if(f.state==='goaround'&&t>=f.t1){f.state='approach';f.t0=t;f.t1=t+approachWin(st);addLog(st,`${cs(f)} back on final.`)}
+    else if(f.state==='landing'&&t>=f.t1){f.state='landed';f.t0=t;st.rwys[f.rwy].busy=null;addLog(st,`${cs(f)} vacated runway ${rwyNames(st)[f.rwy]}. Needs a gate.`)}
+    else if(f.state==='taxiin'&&t>=f.t1){f.state='atgate';f.t0=t;addLog(st,`${cs(f)} on blocks at ${f.gate}. Ready for service.`,'good')}
+    else if(f.state==='atgate'){for(const s of f.sv)if(s.st==='run'&&t>=s.end)s.st='done'}
+    else if(f.state==='pushback'&&t>=f.t1){f.state='taxiout';f.t0=t;f.t1=t+Math.round((10+gateIndex(st,f.gate)*1.2)*taxiMult(st))}
+    else if(f.state==='taxiout'&&t>=f.t1){f.state='holding';f.t0=t;addLog(st,`${cs(f)} holding short, ready for departure.`)}
+    else if(f.state==='takeoff'&&t>=f.t1)depart(st,f);
+  }
+}
+function depart(st,f){
+  st.rwys[f.rwy].busy=null;st.flights=st.flights.filter(x=>x.id!==f.id);
+  const c=st.contracts.find(c=>c.id===f.cid);if(c&&c.active===f.id)c.active=null;
+  let mult,rep;
+  if(f.late<=0){mult=1.15;rep=1;st.stats.ontime++}
+  else if(f.late<=30){mult=1;rep=0}
+  else{mult=Math.max(0.35,1-(f.late-30)/200);rep=-2}
+  const pay=Math.round(f.pay*mult);const before=level();
+  S.money+=pay;S.xp+=8+f.size*4;st.rep=clamp(st.rep+rep,0,100);st.stats.flights++;st.stats.earned+=pay;
+  addLog(st,`${cs(f)} departed to ${f.to}. ${f.late<=0?'On time':`${fmt(f.late)} late`}, earned ${money(pay)}.`,f.late<=0?'good':f.late<=30?'':'bad');
+  const after=level();if(after>before)toast(`Level ${after}! Contract slots now ${slots()}.`,'good');
+}
+
+/* ---------------- actions ---------------- */
+function act(a,d){
+  const st=S.current?A():null;const f=st&&d.f?st.flights.find(x=>x.id==d.f):null;
+  switch(a){
+    case 'view':S.view=d.v;renderAll(true);break;
+    case 'pause':S.paused=!S.paused;break;
+    case 'speed':S.speed=+d.x;S.paused=false;break;
+    case 'land':{const r=+d.x;if(!f||f.state!=='approach'||st.rwys[r].busy)return;
+      f.state='landing';f.rwy=r;f.t0=st.t;f.t1=st.t+landT(st);st.rwys[r].busy=f.id;addLog(st,`${cs(f)} cleared to land runway ${rwyNames(st)[r]}.`);break}
+    case 'gate':{const g=st.gates.find(g=>g.id===d.x);if(!f||f.state!=='landed'||!g||g.f||!fits(g,f))return;
+      g.f=f.id;f.gate=g.id;f.state='taxiin';f.t0=st.t;f.t1=st.t+Math.round((8+gateIndex(st,g.id)*1.5)*taxiMult(st));addLog(st,`${cs(f)} taxi to gate ${g.id}.`);break}
+    case 'svc':{if(!f||f.state!=='atgate')return;const s=f.sv.find(s=>s.k===d.k);
+      if(!s||s.st!=='pending'||!depsMet(f,s))return;if(crewUsed(st)>=st.crew){toast('All ground crews are busy. Hire more under Expand.','bad');return}
+      s.st='run';s.start=st.t;s.end=st.t+s.d;break}
+    case 'push':{if(!f||f.state!=='atgate'||!f.sv.every(s=>s.st==='done'))return;
+      f.late=st.t-f.std;const g=st.gates.find(g=>g.id===f.gate);if(g)g.f=null;
+      f.state='pushback';f.t0=st.t;f.t1=st.t+6;
+      addLog(st,`${cs(f)} pushback approved from ${f.gate}${f.late>0?`, ${fmt(f.late)} behind schedule`:', on time'}.`,f.late>30?'warn':'');break}
+    case 'tko':{const r=+d.x;if(!f||f.state!=='holding'||st.rwys[r].busy)return;
+      f.state='takeoff';f.rwy=r;f.t0=st.t;f.t1=st.t+7;st.rwys[r].busy=f.id;addLog(st,`${cs(f)} cleared for takeoff runway ${rwyNames(st)[r]}.`);break}
+    case 'start':{if(S.current)return;S.airports[d.x]=initAirport(d.x);S.current=d.x;S.view='ops';toast(`Welcome to ${APMAP[d.x].name}. First arrival in a few seconds.`,'good');renderAll(true);break}
+    case 'open':{const ap=APMAP[d.x];const p=UNLOCK[ap.tier];if(S.airports[d.x]||S.money<p)return;
+      S.money-=p;S.airports[d.x]=initAirport(d.x);S.current=d.x;S.view='ops';toast(`${ap.code} opened.`,'good');renderAll(true);break}
+    case 'goto':{if(!S.airports[d.x])return;S.current=d.x;S.view='ops';renderAll(true);break}
+    case 'sign':{const o=st.offers.find(o=>o.id==d.x);if(!o||st.contracts.length>=slots())return;
+      if(!st.gates.some(g=>!!g.cargo===o.cargo&&g.max>=o.size))return;
+      st.offers=st.offers.filter(x=>x!==o);o.due=st.t+rand(20,90);st.contracts.push(o);
+      addLog(st,`Signed ${ALMAP[o.al].n}: ${o.from} → ${o.to}, size ${SIZES[o.size]}.`,'good');renderAll(true);break}
+    case 'cancel':{const c=st.contracts.find(c=>c.id==d.x);if(!c)return;c.confirm=true;renderAll(true);break}
+    case 'cancel-yes':{st.contracts=st.contracts.filter(c=>c.id!=d.x);addLog(st,'Contract cancelled.','warn');renderAll(true);break}
+    case 'cancel-no':{const c=st.contracts.find(c=>c.id==d.x);if(c)c.confirm=false;renderAll(true);break}
+    case 'buygate':{const g=GATE_SHOP.find(g=>g.id===d.x);if(!g||st.gates.some(x=>x.id===g.id)||S.money<g.price)return;
+      S.money-=g.price;st.gates.push({id:g.id,max:g.max,cargo:!!g.cargo,f:null});st.gates.sort((a,b)=>((!!a.cargo)-(!!b.cargo))||(+a.id.slice(1)- +b.id.slice(1)));
+      addLog(st,`Gate ${g.id} opened (size ${sizeRange(g)}${g.cargo?', cargo':''}).`,'good');renderAll(true);break}
+    case 'upg':{const g=st.gates.find(g=>g.id===d.x);if(!g||g.max>=5)return;const p=UPG[g.max+1];if(S.money<p)return;
+      S.money-=p;g.max++;addLog(st,`Gate ${g.id} upgraded to size ${SIZES[g.max]}.`,'good');renderAll(true);break}
+    case 'crew':{const p=crewPrice(st);if(S.money<p)return;S.money-=p;st.crew++;addLog(st,`Hired ground crew #${st.crew}.`,'good');renderAll(true);break}
+    case 'reset':S.confirmReset=true;renderAll(true);break;
+    case 'reset-no':S.confirmReset=false;renderAll(true);break;
+    case 'reset-yes':S=newState();save();renderAll(true);break;
+  }
+  render();
+}
+const crewPrice=st=>5000+1500*(st.crew-5);
+document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b||b.disabled)return;act(b.dataset.act,b.dataset)});
+
+/* ---------------- rendering ---------------- */
+const sig={};
+function put(id,key,html){const el=document.getElementById(id);if(sig[id]===key)return;sig[id]=key;el.innerHTML=html()}
+
+function renderHeader(){
+  const st=S.current?A():null;
+  put('tabs',S.view+'|'+!!S.current,()=>!S.current?'':[['ops','Operations'],['contracts','Contracts'],['expand','Expand'],['airports','Airports']]
+    .map(([v,n])=>`<button class="${S.view===v?'on':''}" data-act="view" data-v="${v}">${n}</button>`).join(''));
+  if(!st){put('hdr-apt','none',()=>'');put('hdr-stats','none',()=>`<div class="stat"><label>Cash</label><span>${money(S.money)}</span></div>`);put('hdr-metar','none',()=>'');return}
+  const ap=APMAP[st.code];
+  put('hdr-apt',st.code,()=>`<span class="code">${st.code}</span><span class="nm"><b>${esc(ap.name)}</b>${esc(ap.city)}, ${ap.st} · ${icao(st.code)}</span>`);
+  const lv=level(),lo=150*(lv-1)**2,hi=150*lv**2,pct=(S.xp-lo)/(hi-lo)*100;
+  const used=crewUsed(st);
+  put('hdr-stats',[Math.round(S.money),lv,Math.round(pct),used,st.crew,st.rep,Math.floor(st.t/60),S.speed,S.paused].join(),()=>`
+    <div class="stat"><label>Local</label><span>${clock(st.t)}</span></div>
+    <div class="stat"><label>Cash</label><span>${money(S.money)}</span></div>
+    <div class="stat"><label>Level ${lv}</label><span>${S.xp} XP</span><div class="xpbar"><i style="width:${pct}%"></i></div></div>
+    <div class="stat"><label>Crews</label><span class="${used>=st.crew?'late':''}">${st.crew-used}/${st.crew} free</span></div>
+    <div class="stat"><label>Reputation</label><span>${st.rep}%</span></div>
+    <div class="ctrl"><button class="${S.paused?'on':''}" data-act="pause" aria-label="Pause">${S.paused?'▶ Resume':'❚❚ Pause'}</button>
+      ${[1,2,3].map(x=>`<button class="${!S.paused&&S.speed===x?'on':''}" data-act="speed" data-x="${x}">${x}×</button>`).join('')}</div>`);
+  put('hdr-metar',st.weather.metar,()=>`METAR <b>${st.weather.metar}</b>`);
+}
+
+function stripHead(f,label3,val3,sub3){
+  const al=ALMAP[f.al];
+  return `<div class="tab"></div><div class="body">
+    <div class="cell"><label>${f.cargo?'Cargo':'Flight'}</label><span class="cs">${cs(f)}</span><span class="sub">${esc(al.n)}</span></div>
+    <div class="cell"><label>${label3==='TO'?'To':'From'}</label><span class="val">${label3==='TO'?f.to:f.from}</span><span class="sub">${esc(PLACE[label3==='TO'?f.to:f.from]||'')}</span></div>
+    <div class="cell"><label>Type</label><span class="val">${esc(f.type)}</span><span class="sub">Size ${SIZES[f.size]} · ${SIZE_NOTE[f.size]}</span></div>`;
+}
+function renderOps(){
+  const st=A();const rn=rwyNames(st);const free=st.rwys.map(r=>!r.busy);
+  // approach
+  const app=st.flights.filter(f=>f.state==='approach'||f.state==='goaround').sort((a,b)=>(a.state>b.state?1:-1)||a.t1-b.t1);
+  $('#c-app').textContent=app.length;
+  const nextDue=Math.min(...st.contracts.map(c=>c.due).filter(d=>d>st.t),Infinity);
+  put('approach',app.map(f=>f.id+f.state+f.t1).join()+'|'+free+rn+(app.length?'':Math.round(nextDue)),()=>app.length?app.map(f=>{
+    if(f.state==='goaround')return `<div class="strip dim" style="--al:${ALMAP[f.al].col}">${stripHead(f)}
+      <div class="foot"><span class="msg">Go-around · back on final in <span class="t" data-until="${f.t1}"></span></span></div></div></div>`;
+    return `<div class="strip" style="--al:${ALMAP[f.al].col}">${stripHead(f)}
+      <div class="wbar ${''}" data-hot="${f.t1}"><i class="rev" data-p0="${f.t0}" data-p1="${f.t1}"></i></div>
+      <div class="foot"><span class="msg"><span class="blink">●</span> Ready to land · <span class="t" data-until="${f.t1}"></span></span>
+      ${rn.map((n,i)=>`<button class="sbtn" data-act="land" data-f="${f.id}" data-x="${i}" ${free[i]?'':'disabled'}>Cleared to land ${n}</button>`).join('')}</div></div></div>`}).join('')
+    :`<div class="empty">No arrivals on final.${isFinite(nextDue)?` Next arrival in <span class="mono" data-until="${nextDue}"></span>.`:''}</div>`);
+  // landed
+  const land=st.flights.filter(f=>f.state==='landed');$('#c-land').textContent=land.length;
+  const gfree=st.gates.filter(g=>!g.f);
+  put('landed',land.map(f=>f.id).join()+'|'+gfree.map(g=>g.id+g.max).join(),()=>land.length?land.map(f=>{
+    const ok=gfree.filter(g=>fits(g,f));
+    return `<div class="strip" style="--al:${ALMAP[f.al].col}">${stripHead(f)}
+      <div class="foot"><span class="msg">Choose a gate${ok.length?'':' · none free for size '+SIZES[f.size]+(f.cargo?' cargo':'')}</span>
+      ${ok.map(g=>`<button class="sbtn" data-act="gate" data-f="${f.id}" data-x="${g.id}">Gate ${g.id}</button>`).join('')}</div></div></div>`}).join('')
+    :`<div class="empty">Landed aircraft wait here for a gate.</div>`);
+  // departures
+  const dep=st.flights.filter(f=>['pushback','taxiout','holding','takeoff'].includes(f.state));$('#c-dep').textContent=dep.length;
+  put('deps',dep.map(f=>f.id+f.state).join()+'|'+free,()=>dep.length?dep.map(f=>{
+    const msg={pushback:'Pushing back',taxiout:'Taxiing to runway',holding:'Holding short · ready for departure',takeoff:'Taking off '+rn[f.rwy]}[f.state];
+    const timed=f.state!=='holding';
+    return `<div class="strip dep" style="--al:${ALMAP[f.al].col}">${stripHead({...f,num:f.num+1},'TO')}
+      ${timed?`<div class="wbar"><i data-p0="${f.t0}" data-p1="${f.t1}"></i></div>`:''}
+      <div class="foot"><span class="msg">${f.state==='holding'?'<span class="blink">●</span> ':''}${msg}${timed?` · <span class="t" data-until="${f.t1}"></span>`:''}</span>
+      ${f.state==='holding'?rn.map((n,i)=>`<button class="sbtn" data-act="tko" data-f="${f.id}" data-x="${i}" ${free[i]?'':'disabled'}>Cleared for takeoff ${n}</button>`).join(''):''}</div></div></div>`}).join('')
+    :`<div class="empty">Aircraft show here after pushback.</div>`);
+  // gates
+  $('#c-gates').textContent=st.gates.length;
+  const crewFree=crewUsed(st)<st.crew;
+  put('gates',st.gates.map(g=>{const f=g.f&&st.flights.find(x=>x.id===g.f);return g.id+g.max+(f?f.state+f.sv.map(s=>s.k+s.st+(s.st==='pending'&&depsMet(f,s)?1:0)).join(''):'-')}).join('|')+crewFree,()=>st.gates.map(g=>{
+    const f=g.f&&st.flights.find(x=>x.id===g.f);
+    const head=`<div class="ghead"><span class="gid">${g.id}</span><span class="acc">${g.cargo?'Cargo · ':''}Size ${sizeRange(g)}</span>`;
+    if(!f)return `<div class="gate">${head}<span class="st pill mute">Open</span></div><div class="empty">Stand free. Accepts ${g.cargo?'cargo aircraft':'passenger aircraft'} up to size ${SIZES[g.max]}.</div></div>`;
+    const al=ALMAP[f.al];const done=f.sv.every(s=>s.st==='done');
+    const pill=f.state==='taxiin'?'<span class="st pill amber">Taxiing in</span>':done?'<span class="st pill go">Ready for pushback</span>':'<span class="st pill go">Ready</span>';
+    const svcs=f.sv.map(s=>{
+      const can=f.state==='atgate'&&s.st==='pending'&&depsMet(f,s);
+      const cls=s.st==='done'?'done':s.st==='run'?'run':can&&crewFree?'ready':'lock';
+      const tm=s.st==='done'?'✓ done':s.st==='run'?`<span data-until="${s.end}"></span>`:`${s.d}s`;
+      const tip=s.st==='pending'&&!depsMet(f,s)?(s.k==='deice'?'Finish all other services first':'Needs '+DEPS[s.k].filter(k=>f.sv.some(x=>x.k===k&&x.st!=='done')).map(k=>SV[k].n).join(', ')+' first'):(!crewFree&&s.st==='pending'?'No ground crew free':SV[s.k].n);
+      return `<button class="svc ${cls} ${s.k==='deice'?'ice':''}" data-act="svc" data-f="${f.id}" data-k="${s.k}" title="${esc(tip)}" ${cls==='ready'?'':'aria-disabled="true"'}>
+        <i class="fill" ${s.st==='run'?`data-p0="${s.start}" data-p1="${s.end}"`:''}></i><span class="ab">${SV[s.k].ab}</span><span class="nm">${SV[s.k].n}</span><span class="tm">${tm}</span></button>`}).join('');
+    return `<div class="gate busy" data-gf="${f.id}">${head}${pill}</div>
+      <div class="gflt" style="--al:${al.col}"><span class="al"></span><span class="cs">${cs(f)}</span><span>${esc(al.n)} · ${esc(f.type)} (${SIZES[f.size]})</span><span>${f.from} → ${f.to} as ${f.al} ${f.num+1}</span></div>
+      ${f.state==='taxiin'?`<div class="tbar"><i data-p0="${f.t0}" data-p1="${f.t1}"></i></div>`:''}
+      <div class="times"><div><label>STD</label><span>${clock(f.std)}</span></div><div><label>Remaining</label><span data-rem="${f.id}"></span></div><div><label>Estimated</label><span data-est="${f.id}"></span></div></div>
+      <div class="svcs">${svcs}</div>
+      <button class="btn" data-act="push" data-f="${f.id}" ${f.state==='atgate'&&done?'':'disabled'}>${done?'Request pushback':'Complete services to push back'}</button></div>`}).join(''));
+  // weather
+  const w=W(st);
+  put('wx',st.weather.metar,()=>{const eff=[];
+    if(w.icing)eff.push('Icing: every departure needs De-Icing, done last');
+    if(w.ts)eff.push('Approach window cut to 22s');
+    if(w.fog)eff.push('Low visibility: longer landing roll');
+    if(w.tx)eff.push(`Taxi times ×${w.tx}`);
+    if(!eff.length)eff.push('No weather restrictions');
+    return `<div class="wx-name">${w.n}</div><div class="mono" style="font-size:12px;color:var(--muted);margin-top:4px">Wind ${String(st.weather.dir).padStart(3,'0')}° at ${st.weather.spd} kt · ${st.weather.temp}°C</div><ul class="wx-eff">${eff.map(e=>`<li>${e}</li>`).join('')}</ul>`});
+  // runways
+  put('rwys',rn.join()+st.rwys.map(r=>r.busy).join(),()=>st.rwys.map((r,i)=>{const f=r.busy&&st.flights.find(x=>x.id===r.busy);
+    return `<div class="rwy"><span class="des">${rn[i]}</span><span class="what">${f?`<b>${f.state==='landing'?'Landing':'Departing'}</b> ${cs(f)}`:'<b class="ok">Clear</b> · arrivals and departures'}</span></div>`}).join('')+
+    `<div style="font-size:11px;color:var(--muted);margin-top:6px">Active ends follow the wind. Landings and takeoffs face into it.</div>`);
+  // log
+  put('log',st.log.length+'|'+(st.log[0]&&st.log[0].t),()=>st.log.map(l=>`<div class="${l.kind}"><span class="mono">${clock(l.t)}</span><b>${esc(l.msg)}</b></div>`).join(''));
+}
+
+function renderContracts(){
+  const st=A();
+  put('v-contracts',st.contracts.map(c=>c.id+(c.confirm?'x':'')).join()+'|'+st.offers.map(o=>o.id).join()+'|'+slots()+'|'+st.gates.map(g=>g.max).join(),()=>`
+    <div class="view-head"><h1>Contracts</h1><p>${st.contracts.length} of ${slots()} slots used. Each contract sends a recurring flight. Gain levels to open more slots; open bigger gates to accept bigger aircraft.</p></div>
+    <div class="tablewrap"><table><thead><tr><th>Airline</th><th>Flight</th><th>Route</th><th>Size</th><th>Every</th><th>Pay / turn</th><th>Next arrival</th><th></th></tr></thead><tbody>
+    ${st.contracts.map(c=>{const al=ALMAP[c.al];return `<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${al.col};margin-right:6px"></span>${esc(al.n)}${c.cargo?' <span class="pill cargo">Cargo</span>':''}</td>
+      <td class="num">${c.al} ${c.num} / ${c.num+1}</td><td class="num">${c.from} → ${st.code} → ${c.to}</td><td><span class="sz">${SIZES[c.size]}</span></td>
+      <td class="num">${fmt(c.interval)}</td><td class="num">${money(payFor(c))}</td><td class="num">${c.active?'In progress':`<span data-until="${c.due}"></span>`}</td>
+      <td>${c.confirm?`<button class="btn danger" data-act="cancel-yes" data-x="${c.id}">Confirm cancel</button> <button class="btn sec" data-act="cancel-no" data-x="${c.id}">Keep</button>`:`<button class="btn sec" data-act="cancel" data-x="${c.id}">Cancel</button>`}</td></tr>`}).join('')}
+    </tbody></table></div>
+    <div class="section"><div class="view-head"><h1 style="font-size:24px">Offers</h1><p>New offers in <span class="mono" data-until="${st.t+st.nextOffers}"></span>.</p></div>
+    <div class="offers">${st.offers.map(o=>{const al=ALMAP[o.al];const gate=st.gates.some(g=>!!g.cargo===o.cargo&&g.max>=o.size);const full=st.contracts.length>=slots();
+      return `<div class="offer"><div style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:10px;border-radius:2px;background:${al.col}"></span><b>${esc(al.n)}</b>${o.cargo?'<span class="pill cargo">Cargo</span>':''}<span class="sz" style="margin-left:auto">${SIZES[o.size]}</span></div>
+        <div class="r">${o.from} → ${st.code} → ${o.to}</div><div class="meta">${SIZE_NOTE[o.size]} · every ${fmt(o.interval)} · e.g. ${esc(TYPES[o.cargo?'cargo':'pax'][o.size][0])}</div>
+        <div class="pay">${money(payFor(o))} per turnaround</div>
+        ${!gate?`<div class="why">Needs a ${o.cargo?'cargo ':''}gate for size ${SIZES[o.size]}. Open or upgrade one under Expand.</div>`:full?'<div class="why">All contract slots in use.</div>':''}
+        <button class="btn" data-act="sign" data-x="${o.id}" ${gate&&!full?'':'disabled'}>Sign contract</button></div>`}).join('')}</div></div>`);
+}
+
+function renderExpand(){
+  const st=A();const owned=new Set(st.gates.map(g=>g.id));const shop=GATE_SHOP.filter(g=>!owned.has(g.id)).sort((a,b)=>a.price-b.price);
+  const cp=crewPrice(st);
+  put('v-expand',[Math.floor(S.money/1000),st.crew,st.gates.map(g=>g.id+g.max).join()].join('|'),()=>`
+    <div class="view-head"><h1>Expand ${st.code}</h1><p>Open more gates, upgrade gate sizes, and hire ground crews. Each crew handles one service at a time.</p></div>
+    <div class="shop">
+      <div class="shopitem"><span class="t">Ground crews · ${st.crew}</span><span class="d">More crews let you run services in parallel and shrink your estimate.</span>
+        <button class="btn" data-act="crew" ${S.money>=cp?'':'disabled'}>Hire crew · ${money(cp)}</button></div>
+    </div>
+    <div class="section"><h2>Your gates</h2><div class="shop">${st.gates.map(g=>`<div class="shopitem"><span class="t">${g.id}</span><span class="d">${g.cargo?'Cargo only':'Passenger'} · accepts size ${sizeRange(g)}</span>
+      ${g.max<5?`<button class="btn sec" data-act="upg" data-x="${g.id}" ${S.money>=UPG[g.max+1]?'':'disabled'}>Upgrade to ${SIZES[g.max+1]} · ${money(UPG[g.max+1])}</button>`:'<span class="pill go" style="align-self:flex-start">Max size</span>'}</div>`).join('')}</div></div>
+    <div class="section"><h2>Gates for sale</h2>${shop.length?`<div class="shop">${shop.map(g=>`<div class="shopitem"><span class="t">${g.id}</span><span class="d">${g.cargo?'Cargo only':'Passenger'} · accepts size ${sizeRange(g)}</span>
+      <button class="btn" data-act="buygate" data-x="${g.id}" ${S.money>=g.price?'':'disabled'}>Open gate · ${money(g.price)}</button></div>`).join('')}</div>`:'<div class="empty">Every gate at this airport is open.</div>'}</div>
+    <div class="section"><h2>Aircraft sizes</h2><div class="sizes">${SIZES.map((s,i)=>`<div><b>${s}</b>${SIZE_NOTE[i]}<br>${TYPES.pax[i].slice(0,3).join(', ')}</div>`).join('')}</div>
+      <p style="color:var(--muted);font-size:13px;max-width:65ch">A gate fits its own size and every smaller size. A size C gate takes A, B and C aircraft. Cargo flights only park at cargo gates.</p></div>`);
+}
+
+function renderAirports(){
+  const q=$('#apt-q').value.trim().toLowerCase(),tier=+$('#apt-tier').value,own=$('#apt-own').value;
+  const list=AIRPORTS.filter(a=>(!tier||a.tier===tier)&&(own==='all'||(own==='mine')===!!S.airports[a.code])&&(!q||(a.code+' '+a.name+' '+a.city+' '+a.st).toLowerCase().includes(q)));
+  const aff=AIRPORTS.filter(a=>S.money>=UNLOCK[a.tier]).length;
+  put('apt-intro',!!S.current+'',()=>S.current?`<div class="view-head"><h1>Airports</h1><p>Money is shared across every airport you run. Each airport keeps its own gates, crews and contracts. Open a new one to grow your network.</p></div>`:`
+    <div class="intro"><div><h1>Pick your home airport</h1><p>${AIRPORTS.length} US commercial airports, from the largest hubs to regional fields. Your first one is free. The rest stay locked until you earn enough to open them.</p></div>
+    <ol><li><b>Clear arrivals to land</b> before their approach window runs out, or they go around and run late.</li>
+      <li><b>Choose a gate</b> that fits the aircraft size. Cargo goes to cargo gates.</li>
+      <li><b>Run ground services</b>: unload, baggage, cleaning, fuel and more, each with a countdown.</li>
+      <li><b>Beat the STD</b>: keep Estimated under Remaining, then request pushback.</li>
+      <li><b>Clear for takeoff</b> to collect pay. On-time departures earn a bonus.</li></ol></div>`);
+  put('apts',[q,tier,own,aff,Object.keys(S.airports).join(),S.current].join('|'),()=>list.length?list.map(a=>{
+    const mine=!!S.airports[a.code],here=S.current===a.code,p=UNLOCK[a.tier];
+    const btn=!S.current?`<button class="btn" data-act="start" data-x="${a.code}">Start here</button>`
+      :here?'<span class="pill amber">Current</span>'
+      :mine?`<button class="btn sec" data-act="goto" data-x="${a.code}">Go to</button>`
+      :`<button class="btn" data-act="open" data-x="${a.code}" ${S.money>=p?'':'disabled'}>Open · ${money(p)}</button>`;
+    return `<div class="apt ${mine?'mine':S.current?'locked':''} ${here?'here':''}"><span class="c">${a.code}</span><span class="n"><b>${esc(a.name)}</b><span>${esc(a.city)}, ${a.st} · ${TIER_NAME[a.tier]}${S.current&&!mine?' · 🔒':''}</span></span>${btn}</div>`}).join('')
+    :'<div class="empty">No airports match that search.</div>');
+  put('reset-zone',!!S.current+''+!!S.confirmReset,()=>!S.current?'':S.confirmReset?`<div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span>Erase all airports, cash and levels?</span><button class="btn danger" data-act="reset-yes">Erase progress</button><button class="btn sec" data-act="reset-no">Keep playing</button></div>`:`<button class="btn sec" data-act="reset">Reset progress</button>`);
+}
+['apt-q','apt-tier','apt-own'].forEach(id=>document.getElementById(id).addEventListener('input',()=>renderAirports()));
+
+function dynamic(){
+  if(!S.current)return;const st=A();const t=st.t;
+  document.querySelectorAll('[data-until]').forEach(e=>{e.textContent=fmt(+e.dataset.until-t)});
+  document.querySelectorAll('[data-p0]').forEach(e=>{const p=clamp((t- +e.dataset.p0)/(+e.dataset.p1- +e.dataset.p0),0,1);e.style.width=((e.classList.contains('rev')?1-p:p)*100)+'%'});
+  document.querySelectorAll('[data-hot]').forEach(e=>e.classList.toggle('hot',+e.dataset.hot-t<10));
+  document.querySelectorAll('[data-rem]').forEach(e=>{const f=st.flights.find(x=>x.id==e.dataset.rem);if(!f)return;const v=f.std-t;
+    e.textContent=v>=0?fmt(v):'+'+fmt(-v);e.className=v<0?'late':''});
+  document.querySelectorAll('[data-est]').forEach(e=>{const f=st.flights.find(x=>x.id==e.dataset.est);if(!f)return;const est=estOf(st,f);
+    e.textContent=fmt(est);e.className=est>f.std-t?'late':'ok';e.closest('.gate')?.classList.toggle('alert',est>f.std-t)});
+}
+
+function renderAll(force){if(force)for(const k in sig)if(k!=='tabs'||true)delete sig[k];render()}
+function render(){
+  const v=S.current?S.view:'airports';
+  ['ops','contracts','expand','airports'].forEach(x=>document.getElementById('v-'+x).hidden=x!==v);
+  renderHeader();
+  if(v==='ops')renderOps();else if(v==='contracts')renderContracts();else if(v==='expand')renderExpand();else renderAirports();
+  dynamic();
+}
+
+/* ---------------- ground radar ---------------- */
+const cv=$('#radar'),ctx=cv.getContext('2d');let CW=0,CH=0;
+function sizeCanvas(){const w=cv.parentElement.clientWidth;if(!w)return;const h=Math.max(230,Math.round(w*0.46));const dpr=window.devicePixelRatio||1;
+  if(CW===w&&CH===h)return;CW=w;CH=h;cv.width=w*dpr;cv.height=h*dpr;cv.style.height=h+'px';ctx.setTransform(dpr,0,0,dpr,0,0)}
+new ResizeObserver(sizeCanvas).observe(cv.parentElement);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const COL={};['--grass','--apron','--rwy','--term','--ink','--muted','--amber','--line','--go','--bad'].forEach(k=>COL[k]=css(k));
+const RY=[0.17,0.33],TX=0.52,GY=0.77;
+const gx=(i,n)=>0.08+0.84*(i+0.5)/Math.max(n,1);
+function along(pts,p){
+  const seg=[];let tot=0;for(let i=1;i<pts.length;i++){const l=Math.hypot(pts[i][0]-pts[i-1][0],(pts[i][1]-pts[i-1][1])*CH/CW);seg.push(l);tot+=l}
+  let d=clamp(p,0,1)*tot;for(let i=0;i<seg.length;i++){if(d<=seg[i]||i===seg.length-1){const q=seg[i]?d/seg[i]:0;const a=pts[i],b=pts[i+1];
+    return{x:a[0]+(b[0]-a[0])*q,y:a[1]+(b[1]-a[1])*q,ang:Math.atan2((b[1]-a[1])*CH,(b[0]-a[0])*CW)}}d-=seg[i]}
+  return{x:pts[0][0],y:pts[0][1],ang:0}
+}
+const PLANE=[[10,0],[4,-1.5],[1,-9],[-1.6,-9],[-1,-1.5],[-7,-1.3],[-9.2,-4.2],[-10.2,-4.2],[-9.2,0]];
+function drawPlane(x,y,ang,sc,col,label,hl){
+  ctx.save();ctx.translate(x*CW,y*CH);ctx.rotate(ang);ctx.scale(sc,sc);ctx.beginPath();
+  PLANE.forEach(([px,py],i)=>i?ctx.lineTo(px,py):ctx.moveTo(px,py));[...PLANE].reverse().forEach(([px,py])=>ctx.lineTo(px,-py));ctx.closePath();
+  ctx.fillStyle=col;ctx.fill();ctx.lineWidth=1/sc;ctx.strokeStyle=hl?COL['--amber']:'rgba(0,0,0,.6)';ctx.stroke();ctx.restore();
+  if(label){ctx.font='600 10px JetBrains Mono, monospace';ctx.fillStyle=hl?COL['--amber']:COL['--ink'];ctx.textAlign='center';ctx.fillText(label,x*CW,y*CH-sc*11-3)}
+}
+function draw(now){
+  if(!S.current||S.view!=='ops'||!CW)return;const st=A();const t=st.t;const n=st.gates.length;const rn=rwyNames(st);
+  ctx.fillStyle=COL['--grass'];ctx.fillRect(0,0,CW,CH);
+  ctx.fillStyle=COL['--apron'];ctx.fillRect(0,(TX-0.04)*CH,CW,CH);
+  // runways
+  RY.forEach((y,i)=>{const h=Math.max(12,CH*0.065);ctx.fillStyle=COL['--rwy'];ctx.fillRect(0.12*CW,y*CH-h/2,0.78*CW,h);
+    ctx.strokeStyle='rgba(255,255,255,.55)';ctx.setLineDash([10,9]);ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(0.16*CW,y*CH);ctx.lineTo(0.86*CW,y*CH);ctx.stroke();ctx.setLineDash([]);
+    ctx.font='600 11px JetBrains Mono, monospace';ctx.fillStyle='rgba(255,255,255,.8)';ctx.textAlign='left';ctx.fillText(rn[i],0.125*CW+2,y*CH+4);
+    if(st.rwys[i].busy){ctx.fillStyle=COL['--bad'];ctx.fillRect(0.12*CW,y*CH-h/2-3,0.78*CW,2)}});
+  // taxiways
+  ctx.strokeStyle='rgba(232,196,103,.55)';ctx.lineWidth=2;ctx.beginPath();
+  ctx.moveTo(0.06*CW,TX*CH);ctx.lineTo(0.94*CW,TX*CH);ctx.moveTo(0.08*CW,TX*CH);ctx.lineTo(0.08*CW,RY[0]*CH);ctx.lineTo(0.12*CW,RY[0]*CH);
+  ctx.moveTo(0.08*CW,RY[1]*CH);ctx.lineTo(0.12*CW,RY[1]*CH);ctx.moveTo(0.88*CW,RY[0]*CH);ctx.lineTo(0.92*CW,RY[0]*CH);ctx.lineTo(0.92*CW,TX*CH);
+  ctx.moveTo(0.88*CW,RY[1]*CH);ctx.lineTo(0.92*CW,RY[1]*CH);ctx.stroke();
+  // terminal + stands
+  ctx.fillStyle=COL['--term'];ctx.fillRect(0.04*CW,0.9*CH,0.92*CW,0.1*CH);
+  ctx.font='600 10px JetBrains Mono, monospace';ctx.textAlign='center';
+  st.gates.forEach((g,i)=>{const x=gx(i,n);ctx.strokeStyle='rgba(232,196,103,.35)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x*CW,TX*CH);ctx.lineTo(x*CW,0.86*CH);ctx.stroke();
+    ctx.fillStyle=g.cargo?'#c9a46a':COL['--muted'];ctx.fillText(g.id+'·'+SIZES[g.max],x*CW,0.965*CH)});
+  // planes
+  const sc=clamp(CW/700,0.75,1.3);const sz=f=>sc*(0.75+f.size*0.13);
+  const app=st.flights.filter(f=>f.state==='approach').sort((a,b)=>a.t1-b.t1);
+  app.forEach((f,i)=>{const blink=Math.floor(now/400)%2;drawPlane(0.045,0.1+i*0.11,0,sz(f)*0.9,ALMAP[f.al].col,cs(f),blink)});
+  const landedQ=st.flights.filter(f=>f.state==='landed');const holdQ=st.flights.filter(f=>f.state==='holding');
+  for(const f of st.flights){
+    const col=ALMAP[f.al].col;const p=f.t1>f.t0?clamp((t-f.t0)/(f.t1-f.t0),0,1):1;const gi=f.gate?gateIndex(st,f.gate):0;const x=gx(gi,n);let pos=null;
+    if(f.state==='landing'){const y=RY[f.rwy];pos=along([[0.02,y-0.05],[0.12,y],[0.88,y]],1-Math.pow(1-p,2))}
+    else if(f.state==='landed'){const i=landedQ.indexOf(f);pos={x:0.92,y:TX-0.06-i*0.07,ang:-Math.PI/2}}
+    else if(f.state==='taxiin')pos=along([[0.92,TX-0.06],[0.92,TX],[x,TX],[x,GY]],p);
+    else if(f.state==='atgate')pos={x,y:GY,ang:Math.PI/2};
+    else if(f.state==='pushback'){pos=along([[x,GY],[x,TX+0.06]],p);pos.ang=Math.PI/2}
+    else if(f.state==='taxiout')pos=along([[x,TX+0.06],[x,TX],[0.08,TX],[0.08,0.43]],p);
+    else if(f.state==='holding'){const i=holdQ.indexOf(f);pos={x:0.08,y:0.43+i*0.0,ang:-Math.PI/2};if(i>0)pos={x:0.08+i*0.05,y:TX,ang:Math.PI}}
+    else if(f.state==='takeoff'){const y=RY[f.rwy];pos=along([[0.08,0.43],[0.08,y],[0.13,y],[1.1,y]],p*p)}
+    if(pos)drawPlane(pos.x,pos.y,pos.ang,sz(f),col,f.state==='atgate'||f.state==='taxiin'?'':cs(f),f.state==='holding'||f.state==='landed');
+  }
+  $('#legend').textContent=`${rn[0]} / ${rn[1]} · wind ${String(st.weather.dir).padStart(3,'0')}@${st.weather.spd}`;
+}
+
+/* ---------------- loop ---------------- */
+let last=performance.now(),uiT=0,saveT=0;
+function frame(now){
+  const dt=Math.min(0.5,(now-last)/1000);last=now;
+  if(S.current&&!S.paused){const st=A();for(let i=0;i<S.speed;i++)step(st,dt)}
+  uiT+=dt;saveT+=dt;
+  if(uiT>=0.2){uiT=0;render()}
+  if(saveT>=5){saveT=0;save()}
+  draw(now);requestAnimationFrame(frame);
+}
+window.addEventListener('pagehide',save);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)save()});
+
+function start(data){
+  S=(data&&data.S&&data.S.airports)?data.S:(loadSave()||newState());
+  S.view=S.current?(S.view||'ops'):'airports';S.confirmReset=false;
+  try{window.claude?.hot?.snapshot?.(()=>({S}))}catch(e){}
+  sizeCanvas();render();requestAnimationFrame(frame);
+}
+window.claude?.hot?.ready?window.claude.hot.ready(start):start(window.claude?.hot?.data??{});
+</script>
+
+</body>
+</html>
