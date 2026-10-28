@@ -523,12 +523,12 @@ function makeContract(st,size,cargo,due){
   const ap=APMAP[st.code];const al=pick(cargo?CARGO_AL:AIRLINES);const r=pickRoute(ap,size);
   const num=cargo?ri(70,980)*2:ri(50,2899)*2;
   return{id:st.seq++,al:al.c,size,cargo:!!cargo,from:r.from,to:r.to,num,interval:Math.round(rand(400+size*40,620+size*60)),
-    due,mult:+(0.9+Math.random()*0.3+(ap.tier===1?0.15:ap.tier===2?0.07:0)+(st.rep-60)/400).toFixed(2),active:null}
+    due,mult:+(0.9+Math.random()*0.3+(ap.tier===1?0.15:ap.tier===2?0.07:0)).toFixed(2),active:null}
 }
 const payFor=c=>Math.round(BASEPAY[c.size]*(c.cargo?1.2:1)*c.mult/10)*10;
 
 function initAirport(code){
-  const st={code,t:0,rep:60,crew:5,seq:1,gates:[{id:'G1',max:1},{id:'G2',max:2},{id:'G3',max:2},{id:'C1',max:3,cargo:true}].map(g=>({...g,f:null})),
+  const st={code,t:0,crew:5,seq:1,gates:[{id:'G1',max:1},{id:'G2',max:2},{id:'G3',max:2},{id:'C1',max:3,cargo:true}].map(g=>({...g,f:null})),
     contracts:[],flights:[],rwys:[{busy:null},{busy:null}],weather:null,nextWx:ri(160,240),offers:[],nextOffers:180,log:[],stats:{flights:0,ontime:0,earned:0}};
   st.weather=makeWeather(APMAP[code],'CLR');
   const plan=[[0],[2],[1],[0],[2],[1],[2,1],[2],[1],[1,1]];const dues=[6,30,60,95,130,165,205,245,290,335];
@@ -622,7 +622,7 @@ function step(st,dt){
   // flights
   for(const f of [...st.flights]){
     if(f.state==='approach'&&t>=f.t1){
-      f.state='goaround';f.t0=t;f.t1=t+35;f.ga++;st.rep=clamp(st.rep-2,0,100);
+      f.state='goaround';f.t0=t;f.t1=t+35;f.ga++;
       addLog(st,`${cs(f)} going around. No landing clearance.`,'bad');toast(`${cs(f)} went around and will be late.`,'bad');
     }else if(f.state==='goaround'&&t>=f.t1){f.state='approach';f.t0=t;f.t1=t+approachWin(st);addLog(st,`${cs(f)} back on final.`)}
     else if(f.state==='landing'&&t>=f.t1){f.state='landed';f.t0=t;st.rwys[f.rwy].busy=null;addLog(st,`${cs(f)} vacated runway ${rwyNames(st)[f.rwy]}. Needs a gate.`)}
@@ -636,12 +636,12 @@ function step(st,dt){
 function depart(st,f){
   st.rwys[f.rwy].busy=null;st.flights=st.flights.filter(x=>x.id!==f.id);
   const c=st.contracts.find(c=>c.id===f.cid);if(c&&c.active===f.id)c.active=null;
-  let mult,rep;
-  if(f.late<=0){mult=1.15;rep=1;st.stats.ontime++}
-  else if(f.late<=30){mult=1;rep=0}
-  else{mult=Math.max(0.35,1-(f.late-30)/200);rep=-2}
+  let mult;
+  if(f.late<=0){mult=1.15;st.stats.ontime++}
+  else if(f.late<=30){mult=1}
+  else{mult=Math.max(0.35,1-(f.late-30)/200)}
   const pay=Math.round(f.pay*mult);const before=level();
-  S.money+=pay;S.xp+=8+f.size*4;st.rep=clamp(st.rep+rep,0,100);st.stats.flights++;st.stats.earned+=pay;
+  S.money+=pay;S.xp+=8+f.size*4;st.stats.flights++;st.stats.earned+=pay;
   addLog(st,`${cs(f)} departed to ${f.to}. ${f.late<=0?'On time':`${fmt(f.late)} late`}, earned ${money(pay)}.`,f.late<=0?'good':f.late<=30?'':'bad');
   const after=level();if(after>before)toast(`Level ${after}! Contract slots now ${slots()}.`,'good');
 }
@@ -705,12 +705,11 @@ function renderHeader(){
   put('hdr-apt',st.code,()=>`<span class="code">${st.code}</span><span class="nm"><b>${esc(ap.name)}</b>${esc(ap.city)}, ${ap.st} · ${icao(st.code)}</span>`);
   const lv=level(),lo=150*(lv-1)**2,hi=150*lv**2,pct=(S.xp-lo)/(hi-lo)*100;
   const used=crewUsed(st);
-  put('hdr-stats',[Math.round(S.money),lv,Math.round(pct),used,st.crew,st.rep,Math.floor(st.t/60),S.speed,S.paused].join(),()=>`
+  put('hdr-stats',[Math.round(S.money),lv,Math.round(pct),used,st.crew,Math.floor(st.t/60),S.speed,S.paused].join(),()=>`
     <div class="stat"><label>Local</label><span>${clock(st.t)}</span></div>
     <div class="stat"><label>Cash</label><span>${money(S.money)}</span></div>
     <div class="stat"><label>Level ${lv}</label><span>${S.xp} XP</span><div class="xpbar"><i style="width:${pct}%"></i></div></div>
     <div class="stat"><label>Crews</label><span class="${used>=st.crew?'late':''}">${st.crew-used}/${st.crew} free</span></div>
-    <div class="stat"><label>Reputation</label><span>${st.rep}%</span></div>
     <div class="ctrl"><button class="${S.paused?'on':''}" data-act="pause" aria-label="Pause">${S.paused?'▶ Resume':'❚❚ Pause'}</button>
       ${[1,2,3].map(x=>`<button class="${!S.paused&&S.speed===x?'on':''}" data-act="speed" data-x="${x}">${x}×</button>`).join('')}</div>`);
   put('hdr-metar',st.weather.metar,()=>`METAR <b>${st.weather.metar}</b>`);
@@ -841,7 +840,7 @@ function renderAirports(){
       <li><b>Choose a gate</b> that fits the aircraft size. Cargo goes to cargo gates.</li>
       <li><b>Run ground services</b>: unload, baggage, cleaning, fuel and more, each with a countdown.</li>
       <li><b>Beat the STD</b>: keep Estimated under Remaining, then request pushback.</li>
-      <li><b>Clear for takeoff</b> to collect pay. On-time departures earn a bonus.</li></ol></div>`);
+      <li><b>Clear for takeoff</b> to collect pay. On-time departures earn a bonus; late ones pay less.</li></ol></div>`);
   put('apts',[q,tier,own,aff,Object.keys(S.airports).join(),S.current].join('|'),()=>list.length?list.map(a=>{
     const mine=!!S.airports[a.code],here=S.current===a.code,p=UNLOCK[a.tier];
     const btn=!S.current?`<button class="btn" data-act="start" data-x="${a.code}">Start here</button>`
